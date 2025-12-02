@@ -38,6 +38,20 @@ const getTeamScore = (team) => {
   );
 };
 
+// A palette of distinct, app-themed colors for wheel segments
+const WHEEL_COLORS = [
+  "#0f172a", // Slate-900
+  "#1e293b", // Slate-800
+  "#334155", // Slate-700
+  "#0891b2", // Cyan-600
+  "#0e7490", // Cyan-700
+  "#155e75", // Cyan-800
+  "#164e63", // Cyan-900
+  "#0c4a6e", // Sky-900
+  "#075985", // Sky-800
+  "#0369a1", // Sky-700
+];
+
 const App = () => {
   // --- Constants ---
   const positionOptions = {
@@ -537,6 +551,9 @@ const App = () => {
                     <span className="bg-slate-800 px-2 py-1 rounded text-xs font-mono uppercase text-slate-400">
                       {currentDraftPlayer?.position}
                     </span>
+                    <span className="bg-slate-800 px-2 py-1 rounded text-xs font-mono uppercase text-slate-400">
+                      {currentDraftPlayer?.batch}
+                    </span>
                     <span
                       className={`px-2 py-1 rounded text-xs font-bold uppercase ${
                         currentDraftPlayer?.category === "Category A"
@@ -608,10 +625,11 @@ const App = () => {
                                               startDeg +=
                                                 (arr[j].weight / totalWeight) *
                                                 360;
+                                            // Use unique color from palette based on index
                                             const color =
-                                              i % 2 === 0
-                                                ? "#0f172a"
-                                                : "#1e293b";
+                                              WHEEL_COLORS[
+                                                i % WHEEL_COLORS.length
+                                              ];
                                             return `${color} ${startDeg}deg ${
                                               startDeg + sliceDeg
                                             }deg`;
@@ -633,14 +651,16 @@ const App = () => {
                       return (
                         <div
                           key={team.id}
-                          className="absolute top-0 left-1/2 h-1/2 w-1 origin-bottom flex justify-center pt-6"
+                          className="absolute top-0 left-1/2 h-1/2 w-12 -translate-x-1/2 origin-bottom flex items-center justify-center pt-4"
                           style={{
-                            transform: `translateX(-50%) rotate(${rotate}deg)`,
+                            transform: `rotate(${rotate}deg)`,
                           }}
                         >
                           <span
-                            className="text-white font-black uppercase text-xs md:text-sm tracking-widest drop-shadow-md whitespace-nowrap -rotate-90 origin-center"
-                            style={{ writingMode: "vertical-rl" }}
+                            className="text-white font-black uppercase text-xs md:text-sm tracking-widest drop-shadow-md whitespace-nowrap origin-center"
+                            style={{
+                              transform: `rotate(-90deg)`,
+                            }}
                           >
                             {team.name}
                           </span>
@@ -783,7 +803,7 @@ const App = () => {
                       onChange={(e) => handleTeamCountChange(e.target.value)}
                       className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-cyan-500 font-mono text-lg"
                     />
-                    <div className="absolute right-4 top-3 text-slate-600 pointer-events-none text-sm font-bold">
+                    <div className="absolute right-12 top-1/2 -translate-y-1/2 text-slate-600 pointer-events-none text-xs font-bold">
                       COUNT
                     </div>
                   </div>
