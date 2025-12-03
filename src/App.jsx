@@ -23,9 +23,9 @@ const getRandomFloat = (max) => Math.random() * max;
 const getRandomOffset = () => Math.random() * 20 - 10;
 
 const SCORES = {
-  "Category A": 100,
-  "Category B": 50,
-  "Category C": 10,
+  "Category A": 50,
+  "Category B": 40,
+  "Category C": 30,
 };
 
 // Wheel Colors Palette
