@@ -825,9 +825,9 @@ const App = () => {
                       max="10"
                       value={teamCount}
                       onChange={(e) => handleTeamCountChange(e.target.value)}
-                      className="w-full bg-slate-950 border border-slate-700 rounded-xl pl-4 pr-16 py-3 text-white focus:outline-none focus:border-cyan-500 font-mono text-lg"
+                      className="w-full bg-slate-950 border border-slate-700 rounded-xl pl-4 pr-2 py-3 text-white focus:outline-none focus:border-cyan-500 font-mono text-lg"
                     />
-                    <div className="absolute right-12 top-1/2 -translate-y-1/2 text-slate-600 pointer-events-none text-xs font-bold">
+                    <div className="absolute right-7 top-1/2 -translate-y-1/2 text-slate-600 pointer-events-none text-xs font-bold">
                       COUNT
                     </div>
                   </div>
