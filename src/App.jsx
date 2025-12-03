@@ -126,19 +126,36 @@ const App = () => {
     };
   }, []);
 
-  // --- Wheel Calculation (Memoized) ---
+  // --- Wheel Calculation (Memoized with GLOBAL CAP) ---
   const wheelSegments = useMemo(() => {
     if (!currentDraftPlayer) return [];
 
+    // 1. Global Player Cap: No team can exceed this size
+    // Use Math.ceil to handle odd numbers
+    const globalCap = Math.ceil(players.length / teamCount);
+
+    // 2. Category Cap: Soft cap for category distribution
     const category = currentDraftPlayer.category;
     const totalInCategory = players.filter(
       (p) => p.category === category
     ).length;
-    const capPerTeam = Math.ceil(totalInCategory / teamCount);
+    const capPerCategory = Math.ceil(totalInCategory / teamCount);
 
+    // 3. Filter Eligible Teams
     let eligibleTeams = draftedTeams.filter(
-      (team) => team.stats[category] < capPerTeam
+      (team) =>
+        team.stats[category] < capPerCategory && // Must need this category
+        team.members.length < globalCap // Must have room for a player
     );
+
+    // Fallback 1: If category cap is too strict (edge cases), drop category check but KEEP global cap
+    if (eligibleTeams.length === 0) {
+      eligibleTeams = draftedTeams.filter(
+        (team) => team.members.length < globalCap
+      );
+    }
+
+    // Fallback 2: If somehow everyone is full (shouldn't happen if math is right), allow all
     if (eligibleTeams.length === 0) eligibleTeams = draftedTeams;
 
     const scores = eligibleTeams.map((t) => getTeamScore(t));
@@ -401,18 +418,31 @@ const App = () => {
     }
   };
 
+  // --- Auto Draft with GLOBAL CAP ---
   const autoDraftRemaining = () => {
     let tempQueue = [...draftQueue];
     let tempTeams = JSON.parse(JSON.stringify(draftedTeams));
+
+    const globalCap = Math.ceil(players.length / teamCount); // Enforce Global Cap
 
     tempQueue.forEach((player) => {
       const category = player.category;
       const totalInCategory = players.filter(
         (p) => p.category === category
       ).length;
-      const capPerTeam = Math.ceil(totalInCategory / teamCount);
+      const capPerCategory = Math.ceil(totalInCategory / teamCount);
 
-      let available = tempTeams.filter((t) => t.stats[category] < capPerTeam);
+      // Filter: Must fit Category Cap AND Global Cap
+      let available = tempTeams.filter(
+        (t) =>
+          t.stats[category] < capPerCategory && t.members.length < globalCap
+      );
+
+      // Fallback: Drop Category Cap, keep Global Cap
+      if (available.length === 0) {
+        available = tempTeams.filter((t) => t.members.length < globalCap);
+      }
+      // Last Resort
       if (available.length === 0) available = tempTeams;
 
       const scores = available.map((t) => getTeamScore(t));
