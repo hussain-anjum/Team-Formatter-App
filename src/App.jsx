@@ -17,11 +17,9 @@ import {
   FastForward,
 } from "lucide-react";
 
-// --- Helpers: Pure Logic (Outside Component) ---
-// We move ALL random logic here to satisfy strict linters
-// const getRandomIndex = (length) => Math.floor(Math.random() * length);
+// --- Helpers: Pure Logic ---
 const getRandomFloat = (max) => Math.random() * max;
-const getRandomOffset = () => Math.random() * 20 - 10; // +/- 10 degrees randomness
+const getRandomOffset = () => Math.random() * 20 - 10;
 
 const SCORES = {
   "Category A": 100,
@@ -29,7 +27,21 @@ const SCORES = {
   "Category C": 10,
 };
 
-// Pure helper to calculate score
+// Wheel Colors Palette
+const WHEEL_COLORS = [
+  "#0369a1", // Sky-700
+  "#155e75", // Cyan-800
+  "#1e293b", // Slate-800
+  "#075985", // Sky-800
+  "#0c4a6e", // Sky-900
+  "#334155", // Slate-700
+  "#0891b2", // Cyan-600
+  "#164e63", // Cyan-900
+  "#0f172a", // Slate-900
+  "#0e7490", // Cyan-700
+];
+
+// Helper
 const getTeamScore = (team) => {
   return (
     team.stats["Category A"] * SCORES["Category A"] +
@@ -38,48 +50,20 @@ const getTeamScore = (team) => {
   );
 };
 
-// A palette of distinct, app-themed colors for wheel segments
-const WHEEL_COLORS = [
-  "#0f172a", // Slate-900
-  "#1e293b", // Slate-800
-  "#334155", // Slate-700
-  "#0891b2", // Cyan-600
-  "#0e7490", // Cyan-700
-  "#155e75", // Cyan-800
-  "#164e63", // Cyan-900
-  "#0c4a6e", // Sky-900
-  "#075985", // Sky-800
-  "#0369a1", // Sky-700
-];
-
 const App = () => {
-  // --- Constants ---
-  const positionOptions = {
-    Cricket: ["All-rounder", "Batsman", "Bowler", "Wicket Keeper"],
-    Football: ["Striker", "Midfielder", "Defender", "Goalkeeper"],
-  };
-
-  const batchOptions = [15, 16, 17, 18, 19, 20];
-
-  // --- State Management ---
+  // --- State ---
   const [eventName, setEventName] = useState("Cricket");
   const [teamCount, setTeamCount] = useState(2);
-
-  // Input States
   const [inputName, setInputName] = useState("");
-  const [inputPosition, setInputPosition] = useState(
-    positionOptions["Cricket"][0]
-  );
+  const [inputPosition, setInputPosition] = useState("All-rounder");
   const [inputCategory, setInputCategory] = useState("Category A");
   const [inputBatch, setInputBatch] = useState("Batch 19");
   const [inputPhoto, setInputPhoto] = useState(null);
 
-  // Data States
   const [players, setPlayers] = useState([]);
   const [teamNames, setTeamNames] = useState(["Team Alpha", "Team Beta"]);
-  const [generatedTeams, setGeneratedTeams] = useState([]); // Fixed: Missing state added
+  const [generatedTeams, setGeneratedTeams] = useState([]);
 
-  // Draft System States
   const [isDrafting, setIsDrafting] = useState(false);
   const [draftQueue, setDraftQueue] = useState([]);
   const [currentDraftPlayer, setCurrentDraftPlayer] = useState(null);
@@ -88,6 +72,9 @@ const App = () => {
   const [wheelRotation, setWheelRotation] = useState(0);
   const [isSpinning, setIsSpinning] = useState(false);
   const [showFinalResults, setShowFinalResults] = useState(false);
+
+  // New State for the Winner Modal
+  const [draftWinner, setDraftWinner] = useState(null);
 
   // History State
   const [eventHistory, setEventHistory] = useState({
@@ -103,13 +90,30 @@ const App = () => {
     },
   });
 
+  const positionOptions = {
+    Cricket: ["All-rounder", "Batsman", "Bowler", "Wicket Keeper"],
+    Football: ["Striker", "Midfielder", "Defender", "Goalkeeper"],
+  };
+  const batchOptions = [15, 16, 17, 18, 19, 20];
   const fileInputRef = useRef(null);
+  const canvasRef = useRef(null);
+
+  // Constants
+  const theme = {
+    bg: "bg-slate-950",
+    cardBg: "bg-slate-900",
+    accent: "text-cyan-400",
+    border: "border-cyan-500/30",
+    glow: "shadow-[0_0_20px_rgba(34,211,238,0.15)]",
+    button:
+      "bg-cyan-500 hover:bg-cyan-400 text-slate-900 font-bold uppercase tracking-wider",
+  };
 
   useEffect(() => {
     document.title = "Team Formatter App";
   }, []);
 
-  // --- Load PDF Library ---
+  // PDF Lib
   useEffect(() => {
     const script = document.createElement("script");
     script.src =
@@ -121,18 +125,83 @@ const App = () => {
     };
   }, []);
 
-  const theme = {
-    bg: "bg-slate-950",
-    cardBg: "bg-slate-900",
-    accent: "text-cyan-400",
-    border: "border-cyan-500/30",
-    glow: "shadow-[0_0_20px_rgba(34,211,238,0.15)]",
-    button:
-      "bg-cyan-500 hover:bg-cyan-400 text-slate-900 font-bold uppercase tracking-wider",
-  };
+  // --- Wheel Calculation (Memoized) ---
+  const wheelSegments = useMemo(() => {
+    if (!currentDraftPlayer) return [];
+
+    const category = currentDraftPlayer.category;
+    const totalInCategory = players.filter(
+      (p) => p.category === category
+    ).length;
+    const capPerTeam = Math.ceil(totalInCategory / teamCount);
+
+    let eligibleTeams = draftedTeams.filter(
+      (team) => team.stats[category] < capPerTeam
+    );
+    if (eligibleTeams.length === 0) eligibleTeams = draftedTeams;
+
+    const scores = eligibleTeams.map((t) => getTeamScore(t));
+    const maxScore = Math.max(...scores);
+
+    return eligibleTeams.map((team) => {
+      const score = getTeamScore(team);
+      const weight = maxScore - score + 20;
+      return { ...team, weight };
+    });
+  }, [currentDraftPlayer, draftedTeams, players, teamCount]);
+
+  // --- Draw Wheel on Canvas ---
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas || wheelSegments.length === 0) return;
+
+    const ctx = canvas.getContext("2d");
+    const size = 500; // High res
+    canvas.width = size;
+    canvas.height = size;
+
+    const centerX = size / 2;
+    const centerY = size / 2;
+    const radius = size / 2 - 10; // Padding
+
+    ctx.clearRect(0, 0, size, size);
+
+    const totalWeight = wheelSegments.reduce((sum, t) => sum + t.weight, 0);
+    // Start at -90deg (12 o'clock) so CSS rotation 0 aligns with Top
+    let startAngle = -Math.PI / 2;
+
+    wheelSegments.forEach((team, index) => {
+      const sliceAngle = (team.weight / totalWeight) * 2 * Math.PI;
+      const endAngle = startAngle + sliceAngle;
+
+      // Draw Segment
+      ctx.beginPath();
+      ctx.moveTo(centerX, centerY);
+      ctx.arc(centerX, centerY, radius, startAngle, endAngle);
+      ctx.closePath();
+      ctx.fillStyle = WHEEL_COLORS[index % WHEEL_COLORS.length];
+      ctx.fill();
+      ctx.lineWidth = 4;
+      ctx.strokeStyle = "#0f172a"; // Border between slices
+      ctx.stroke();
+
+      // Draw Text
+      ctx.save();
+      ctx.translate(centerX, centerY);
+      ctx.rotate(startAngle + sliceAngle / 2); // Rotate to middle of slice
+      ctx.textAlign = "right";
+      ctx.textBaseline = "middle";
+      ctx.fillStyle = "#ffffff";
+      ctx.font = "bold 24px monospace";
+      // Draw text from edge inwards
+      ctx.fillText(team.name.toUpperCase(), radius - 30, 0);
+      ctx.restore();
+
+      startAngle += sliceAngle;
+    });
+  }, [wheelSegments]);
 
   // --- Handlers ---
-
   const handleSwitchEvent = (newEvent) => {
     if (newEvent === eventName) return;
     setEventHistory((prev) => ({
@@ -206,42 +275,11 @@ const App = () => {
     setTeamNames(newNames);
   };
 
-  // --- DRAFT LOGIC ---
-
-  // REPLACED: useEffect with useMemo for stability
-  // This calculates segments automatically whenever the player or teams change
-  const wheelSegments = useMemo(() => {
-    if (!currentDraftPlayer) return [];
-
-    const category = currentDraftPlayer.category;
-    const totalInCategory = players.filter(
-      (p) => p.category === category
-    ).length;
-    const capPerTeam = Math.ceil(totalInCategory / teamCount);
-
-    let eligibleTeams = draftedTeams.filter(
-      (team) => team.stats[category] < capPerTeam
-    );
-    if (eligibleTeams.length === 0) eligibleTeams = draftedTeams;
-
-    const scores = eligibleTeams.map((t) => getTeamScore(t));
-    const maxScore = Math.max(...scores);
-
-    // Weight Formula: Lower score = Higher weight
-    return eligibleTeams.map((team) => {
-      const score = getTeamScore(team);
-      const weight = maxScore - score + 20;
-      return { ...team, weight };
-    });
-  }, [currentDraftPlayer, draftedTeams, players, teamCount]);
-
   const startDraft = () => {
     if (players.length < teamCount) {
       alert("Not enough players to create teams!");
       return;
     }
-
-    // Use helper for sorting to avoid "impure" warning
     const shuffle = (array) => array.sort(() => getRandomOffset());
     const catA = shuffle(players.filter((p) => p.category === "Category A"));
     const catB = shuffle(players.filter((p) => p.category === "Category B"));
@@ -270,9 +308,7 @@ const App = () => {
 
     setIsSpinning(true);
 
-    // 1. Determine Winner
     const totalWeight = wheelSegments.reduce((sum, t) => sum + t.weight, 0);
-    // FIXED: Use external helper
     let randomNum = getRandomFloat(totalWeight);
     let winnerTeam = wheelSegments[0];
 
@@ -284,52 +320,50 @@ const App = () => {
       randomNum -= team.weight;
     }
 
-    // 2. Calculate Rotation
     let currentAngle = 0;
-    const sliceAngles = wheelSegments.map((t) => {
-      const angle = (t.weight / totalWeight) * 360;
-      const segment = {
-        ...t,
-        startAngle: currentAngle,
-        endAngle: currentAngle + angle,
-      };
-      currentAngle += angle;
-      return segment;
-    });
+    let winnerCenterAngle = 0;
 
-    const winnerSegment = sliceAngles.find((s) => s.id === winnerTeam.id);
-    const segmentCenter =
-      winnerSegment.startAngle +
-      (winnerSegment.endAngle - winnerSegment.startAngle) / 2;
+    for (let team of wheelSegments) {
+      const sliceAngle = (team.weight / totalWeight) * 360;
+      if (team.id === winnerTeam.id) {
+        winnerCenterAngle = currentAngle + sliceAngle / 2;
+        break;
+      }
+      currentAngle += sliceAngle;
+    }
 
-    const landingRotation = 360 - segmentCenter;
+    const landingRotation = 360 - winnerCenterAngle;
     const fullSpins = 360 * 5;
     const currentMod = wheelRotation % 360;
-    const distanceToTarget = landingRotation - currentMod;
 
+    const distanceToTarget = landingRotation - currentMod;
     const targetRotation =
       wheelRotation +
       fullSpins +
       (distanceToTarget > 0 ? distanceToTarget : 360 + distanceToTarget);
 
-    const segmentWidth = winnerSegment.endAngle - winnerSegment.startAngle;
-    // FIXED: Use external helper
-    const safeOffset = getRandomFloat(segmentWidth * 0.6) - segmentWidth * 0.3;
+    const winnerSlice = (winnerTeam.weight / totalWeight) * 360;
+    const safeOffset = getRandomFloat(winnerSlice * 0.6) - winnerSlice * 0.3;
 
-    const newRotation = targetRotation + safeOffset;
-
-    // FIXED: Used the variable
-    setWheelRotation(newRotation);
+    setWheelRotation(targetRotation + safeOffset);
 
     setTimeout(() => {
-      assignPlayerToTeam(winnerTeam);
+      // Pausing here to show modal instead of auto-assigning
+      setDraftWinner({ team: winnerTeam, player: currentDraftPlayer });
       setIsSpinning(false);
     }, 3000);
   };
 
+  // Called when user clicks "Confirm" on the modal
+  const handleConfirmDraft = () => {
+    if (draftWinner) {
+      assignPlayerToTeam(draftWinner.team);
+      setDraftWinner(null);
+    }
+  };
+
   const assignPlayerToTeam = (team) => {
     if (!team) return;
-
     const updatedTeams = draftedTeams.map((t) => {
       if (t.id === team.id) {
         return {
@@ -391,7 +425,6 @@ const App = () => {
         (sum, t) => sum + t.weight,
         0
       );
-      // FIXED: Use external helper
       let randomNum = getRandomFloat(totalWeight);
       let winner = weightedAvailable[0];
 
@@ -524,6 +557,7 @@ const App = () => {
             </div>
 
             <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-6 p-6">
+              {/* Left: Player Card */}
               <div className="lg:col-span-3 flex flex-col gap-4">
                 <div className="bg-slate-900 border border-cyan-500/30 p-6 rounded-2xl shadow-[0_0_30px_rgba(34,211,238,0.1)] flex flex-col items-center text-center relative overflow-hidden">
                   <div className="absolute top-0 w-full h-1 bg-gradient-to-r from-transparent via-cyan-500 to-transparent"></div>
@@ -600,74 +634,22 @@ const App = () => {
                 </div>
               </div>
 
+              {/* Center: Canvas Wheel */}
               <div className="lg:col-span-6 flex flex-col items-center justify-center relative min-h-[400px]">
                 <div className="relative w-80 h-80 md:w-96 md:h-96">
+                  {/* Pointer */}
                   <div className="absolute -top-6 left-1/2 -translate-x-1/2 z-20 text-cyan-500 drop-shadow-[0_0_10px_rgba(34,211,238,0.8)]">
                     <div className="w-0 h-0 border-l-[15px] border-l-transparent border-r-[15px] border-r-transparent border-t-[30px] border-t-cyan-500"></div>
                   </div>
-                  <div
-                    className="w-full h-full rounded-full border-8 border-slate-800 shadow-[0_0_50px_rgba(0,0,0,0.5)] relative overflow-hidden transition-transform duration-[3000ms] cubic-bezier(0.25, 1, 0.5, 1)"
-                    style={{
-                      transform: `rotate(${wheelRotation}deg)`,
-                      background: `conic-gradient(
-                                        ${wheelSegments
-                                          .map((team, i, arr) => {
-                                            const totalWeight = arr.reduce(
-                                              (sum, t) => sum + t.weight,
-                                              0
-                                            );
-                                            const weightPercentage =
-                                              team.weight / totalWeight;
-                                            const sliceDeg =
-                                              weightPercentage * 360;
-                                            let startDeg = 0;
-                                            for (let j = 0; j < i; j++)
-                                              startDeg +=
-                                                (arr[j].weight / totalWeight) *
-                                                360;
-                                            // Use unique color from palette based on index
-                                            const color =
-                                              WHEEL_COLORS[
-                                                i % WHEEL_COLORS.length
-                                              ];
-                                            return `${color} ${startDeg}deg ${
-                                              startDeg + sliceDeg
-                                            }deg`;
-                                          })
-                                          .join(", ")}
-                                    )`,
-                    }}
-                  >
-                    {wheelSegments.map((team, i, arr) => {
-                      const totalWeight = arr.reduce(
-                        (sum, t) => sum + t.weight,
-                        0
-                      );
-                      let startDeg = 0;
-                      for (let j = 0; j < i; j++)
-                        startDeg += (arr[j].weight / totalWeight) * 360;
-                      const sliceDeg = (team.weight / totalWeight) * 360;
-                      const rotate = startDeg + sliceDeg / 2;
-                      return (
-                        <div
-                          key={team.id}
-                          className="absolute top-0 left-1/2 h-1/2 w-12 -translate-x-1/2 origin-bottom flex items-center justify-center pt-4"
-                          style={{
-                            transform: `rotate(${rotate}deg)`,
-                          }}
-                        >
-                          <span
-                            className="text-white font-black uppercase text-xs md:text-sm tracking-widest drop-shadow-md whitespace-nowrap origin-center"
-                            style={{
-                              transform: `rotate(-90deg)`,
-                            }}
-                          >
-                            {team.name}
-                          </span>
-                        </div>
-                      );
-                    })}
-                  </div>
+
+                  {/* Canvas Wheel */}
+                  <canvas
+                    ref={canvasRef}
+                    className="w-full h-full rounded-full border-8 border-slate-800 shadow-[0_0_50px_rgba(0,0,0,0.5)] transition-transform duration-[3000ms] cubic-bezier(0.25, 1, 0.5, 1)"
+                    style={{ transform: `rotate(${wheelRotation}deg)` }}
+                  />
+
+                  {/* Center Hub */}
                   <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-20 h-20 bg-slate-900 border-4 border-cyan-500 rounded-full flex items-center justify-center z-10 shadow-[0_0_30px_cyan]">
                     <button
                       onClick={spinWheel}
@@ -689,6 +671,7 @@ const App = () => {
                 </p>
               </div>
 
+              {/* Right: Dashboard */}
               <div className="lg:col-span-3 flex flex-col gap-4">
                 <div className="bg-slate-900 border border-slate-800 p-4 rounded-2xl h-full overflow-y-auto">
                   <h3 className="text-xs font-bold text-white uppercase tracking-widest mb-4 flex items-center gap-2">
@@ -752,9 +735,39 @@ const App = () => {
                 </div>
               </div>
             </div>
+
+            {/* --- WINNER MODAL --- */}
+            {draftWinner && (
+              <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 backdrop-blur-sm animate-in fade-in duration-300">
+                <div className="bg-slate-900 border border-cyan-500/30 p-8 rounded-2xl shadow-[0_0_50px_rgba(34,211,238,0.2)] max-w-sm w-full text-center transform scale-100 animate-in zoom-in-95 duration-200">
+                  <h2 className="text-2xl font-black text-white uppercase italic mb-4">
+                    Draft Pick!
+                  </h2>
+
+                  <div className="bg-slate-950 p-6 rounded-xl border border-slate-800 mb-6 relative overflow-hidden">
+                    <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-cyan-500 to-transparent"></div>
+                    <div className="text-sm text-slate-400 mb-2 uppercase tracking-widest">
+                      {draftWinner.player.name} goes to
+                    </div>
+                    <Trophy className="w-12 h-12 text-cyan-400 mx-auto mb-2 animate-bounce" />
+                    <p className="text-3xl font-black text-white uppercase break-words leading-tight">
+                      {draftWinner.team.name}
+                    </p>
+                  </div>
+
+                  <button
+                    onClick={handleConfirmDraft}
+                    className="w-full bg-cyan-600 text-white py-3 rounded-xl font-bold uppercase tracking-widest hover:bg-cyan-500 transition-all hover:shadow-[0_0_20px_rgba(34,211,238,0.4)] hover:-translate-y-0.5"
+                  >
+                    Continue Draft
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         ) : (
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
+            {/* Setup Config */}
             <div
               className={`lg:col-span-5 ${theme.cardBg} border ${theme.border} p-6 md:p-8 rounded-2xl relative overflow-hidden shadow-2xl`}
             >
@@ -801,7 +814,7 @@ const App = () => {
                       max="10"
                       value={teamCount}
                       onChange={(e) => handleTeamCountChange(e.target.value)}
-                      className="w-full bg-slate-950 border border-slate-700 rounded-xl px-4 py-3 text-white focus:outline-none focus:border-cyan-500 font-mono text-lg"
+                      className="w-full bg-slate-950 border border-slate-700 rounded-xl pl-4 pr-16 py-3 text-white focus:outline-none focus:border-cyan-500 font-mono text-lg"
                     />
                     <div className="absolute right-12 top-1/2 -translate-y-1/2 text-slate-600 pointer-events-none text-xs font-bold">
                       COUNT
@@ -917,6 +930,7 @@ const App = () => {
               </div>
             </div>
 
+            {/* Draft Pool */}
             <div className="lg:col-span-7 flex flex-col h-full">
               <div
                 className={`${theme.cardBg} border ${theme.border} rounded-2xl p-6 md:p-8 flex-1 min-h-[500px] flex flex-col shadow-2xl`}
@@ -1053,6 +1067,7 @@ const App = () => {
           </div>
         )}
 
+        {/* --- Results View --- */}
         {showFinalResults && (
           <div
             id="results-area"
