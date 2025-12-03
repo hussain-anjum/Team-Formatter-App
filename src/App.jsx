@@ -15,6 +15,7 @@ import {
   Mail,
   Play,
   FastForward,
+  ArrowLeft,
 } from "lucide-react";
 
 // --- Helpers: Pure Logic ---
@@ -536,6 +537,7 @@ const App = () => {
       <main className="max-w-7xl mx-auto px-4 mt-8">
         {isDrafting ? (
           <div className="fixed inset-0 bg-slate-950 z-50 flex flex-col animate-in fade-in duration-500 overflow-y-auto">
+            {/* Draft Header */}
             <div className="p-6 border-b border-slate-800 flex justify-between items-center bg-slate-900/50 backdrop-blur">
               <div className="flex items-center gap-4">
                 <Activity className="text-cyan-400 animate-pulse" />
@@ -548,12 +550,21 @@ const App = () => {
                   </p>
                 </div>
               </div>
-              <button
-                onClick={autoDraftRemaining}
-                className="flex items-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-xs font-bold uppercase tracking-wider border border-slate-700 transition-colors"
-              >
-                <FastForward size={16} /> Auto-Finish Draft
-              </button>
+              {/* Header Buttons Container */}
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() => setIsDrafting(false)}
+                  className="flex items-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-xs font-bold uppercase tracking-wider border border-slate-700 transition-colors text-slate-300 hover:text-white"
+                >
+                  <ArrowLeft size={16} /> Back
+                </button>
+                <button
+                  onClick={autoDraftRemaining}
+                  className="flex items-center gap-2 px-4 py-2 bg-cyan-900/30 hover:bg-cyan-900/50 rounded-lg text-xs font-bold uppercase tracking-wider border border-cyan-800/50 text-cyan-400 transition-colors"
+                >
+                  <FastForward size={16} /> Auto-Finish
+                </button>
+              </div>
             </div>
 
             <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-6 p-6">
