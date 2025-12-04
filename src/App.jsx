@@ -25,7 +25,6 @@ import {
   AlertCircle, // Added Icon
 } from "lucide-react";
 
-// --- Helpers: Pure Logic ---
 const getRandomFloat = (max) => Math.random() * max;
 const getRandomOffset = () => Math.random() * 20 - 10;
 
@@ -142,7 +141,7 @@ const App = () => {
     };
   }, []);
 
-  // --- Wheel Calculation (Memoized) ---
+  //Wheel Calculation
   const wheelSegments = useMemo(() => {
     if (!currentDraftPlayer) return [];
 
@@ -183,7 +182,7 @@ const App = () => {
     });
   }, [currentDraftPlayer, draftedTeams, players, teamCount]);
 
-  // --- Draw Wheel ---
+  // Draw Wheel
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas || wheelSegments.length === 0) return;
@@ -229,7 +228,7 @@ const App = () => {
     });
   }, [wheelSegments]);
 
-  // --- Handlers ---
+  // Handlers
   const handleSwitchEvent = (newEvent) => {
     if (newEvent === eventName) return;
     setEventHistory((prev) => ({
@@ -309,7 +308,6 @@ const App = () => {
     setTeamNames(newNames);
   };
 
-  // --- CAPTAIN LOGIC ---
   const openCaptainSelection = (player) => {
     setCaptainSelection({ player });
   };
@@ -344,7 +342,6 @@ const App = () => {
     }
   };
 
-  // --- START LOGIC ---
   const initializeTeams = () => {
     return Array.from({ length: teamCount }, (_, i) => {
       const captain = teamCaptains[i];
@@ -417,7 +414,7 @@ const App = () => {
     setIsFinalizing(false);
   };
 
-  // --- QUEUE MANAGEMENT LOGIC ---
+  //
   const moveToNextPlayer = (
     currentUnsoldList = unsoldPlayers,
     currentTeams = draftedTeams
@@ -450,7 +447,6 @@ const App = () => {
     }
   };
 
-  // --- AUCTION LOGIC ---
   const handleAuctionSale = (team) => {
     const totalPlayers =
       players.length +
@@ -485,7 +481,6 @@ const App = () => {
     setAuctionWinner(null);
   };
 
-  // --- DRAFT WHEEL LOGIC ---
   const spinWheel = () => {
     if (isSpinning || !currentDraftPlayer || wheelSegments.length === 0) return;
 
@@ -539,7 +534,6 @@ const App = () => {
     }
   };
 
-  // --- COMMON ASSIGNMENT LOGIC ---
   const assignPlayerToTeam = (team) => {
     const updatedTeams = draftedTeams.map((t) => {
       if (t.id === team.id) {
@@ -565,7 +559,7 @@ const App = () => {
     moveToNextPlayer(unsoldPlayers, updatedTeams);
   };
 
-  // --- AUTO DRAFT ---
+  // AUTO DRAFT
   const autoDraftRemaining = () => {
     let tempQueue = [...draftQueue, ...unsoldPlayers];
     let tempTeams = JSON.parse(JSON.stringify(draftedTeams));
@@ -863,7 +857,6 @@ const App = () => {
                     </button>
                   </div>
                 ) : (
-                  // Standard Draft Left Panel (Player Card + History)
                   <>
                     <div className="bg-slate-900 border border-cyan-500/30 p-6 rounded-2xl shadow-[0_0_30px_rgba(34,211,238,0.1)] flex flex-col items-center text-center relative overflow-hidden">
                       <div className="absolute top-0 w-full h-1 bg-gradient-to-r from-transparent via-cyan-500 to-transparent"></div>
@@ -971,7 +964,6 @@ const App = () => {
                     </p>
                   </div>
                 ) : (
-                  // Auction Mode Center - BIG PLAYER CARD (Restored Rectangular Design)
                   <div className="w-full max-w-md">
                     <div className="bg-slate-900 border border-cyan-500/30 p-8 rounded-2xl shadow-[0_0_50px_rgba(34,211,238,0.15)] flex flex-col items-center text-center relative overflow-hidden transform scale-110">
                       <div className="absolute top-0 w-full h-1 bg-gradient-to-r from-transparent via-cyan-500 to-transparent"></div>
@@ -1226,9 +1218,9 @@ const App = () => {
                       max="10"
                       value={teamCount}
                       onChange={(e) => handleTeamCountChange(e.target.value)}
-                      className="w-full bg-slate-950 border border-slate-700 rounded-xl pl-4 pr-24 py-3 text-white focus:outline-none focus:border-cyan-500 font-mono text-lg"
+                      className="w-full bg-slate-950 border border-slate-700 rounded-xl pl-4 pr-2 py-3 text-white focus:outline-none focus:border-cyan-500 font-mono text-lg"
                     />
-                    <div className="absolute right-14 top-1/2 -translate-y-1/2 text-slate-600 pointer-events-none text-xs font-bold">
+                    <div className="absolute right-7 top-1/2 -translate-y-1/2 text-slate-600 pointer-events-none text-xs font-bold">
                       COUNT
                     </div>
                   </div>
