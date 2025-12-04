@@ -16,6 +16,12 @@ import {
   Play,
   FastForward,
   ArrowLeft,
+  Gavel,
+  User,
+  Crown,
+  X,
+  RotateCcw,
+  Ban,
 } from "lucide-react";
 
 // --- Helpers: Pure Logic ---
@@ -63,10 +69,16 @@ const App = () => {
 
   const [players, setPlayers] = useState([]);
   const [teamNames, setTeamNames] = useState(["Team Alpha", "Team Beta"]);
+  const [teamCaptains, setTeamCaptains] = useState([null, null]);
   const [generatedTeams, setGeneratedTeams] = useState([]);
 
+  // Modes
   const [isDrafting, setIsDrafting] = useState(false);
+  const [isAuctioning, setIsAuctioning] = useState(false);
+  const [isFinalizing, setIsFinalizing] = useState(false); // New State for Finalizing Popup
+
   const [draftQueue, setDraftQueue] = useState([]);
+  const [unsoldPlayers, setUnsoldPlayers] = useState([]); // New State for Unsold
   const [currentDraftPlayer, setCurrentDraftPlayer] = useState(null);
   const [draftedTeams, setDraftedTeams] = useState([]);
   const [draftHistory, setDraftHistory] = useState([]);
@@ -74,8 +86,10 @@ const App = () => {
   const [isSpinning, setIsSpinning] = useState(false);
   const [showFinalResults, setShowFinalResults] = useState(false);
 
-  // New State for the Winner Modal
+  // Modals
   const [draftWinner, setDraftWinner] = useState(null);
+  const [auctionWinner, setAuctionWinner] = useState(null);
+  const [captainSelection, setCaptainSelection] = useState(null);
 
   // History State
   const [eventHistory, setEventHistory] = useState({
@@ -83,11 +97,13 @@ const App = () => {
       players: [],
       teamCount: 2,
       teamNames: ["Team Alpha", "Team Beta"],
+      teamCaptains: [null, null],
     },
     Football: {
       players: [],
       teamCount: 2,
       teamNames: ["Team Alpha", "Team Beta"],
+      teamCaptains: [null, null],
     },
   });
 
@@ -99,7 +115,6 @@ const App = () => {
   const fileInputRef = useRef(null);
   const canvasRef = useRef(null);
 
-  // Constants
   const theme = {
     bg: "bg-slate-950",
     cardBg: "bg-slate-900",
@@ -114,7 +129,6 @@ const App = () => {
     document.title = "Team Formatter App";
   }, []);
 
-  // PDF Lib
   useEffect(() => {
     const script = document.createElement("script");
     script.src =
@@ -126,36 +140,35 @@ const App = () => {
     };
   }, []);
 
-  // --- Wheel Calculation (Memoized with GLOBAL CAP) ---
+  // --- Wheel Calculation (Memoized) ---
   const wheelSegments = useMemo(() => {
     if (!currentDraftPlayer) return [];
 
-    // 1. Global Player Cap: No team can exceed this size
-    // Use Math.ceil to handle odd numbers
-    const globalCap = Math.ceil(players.length / teamCount);
-
-    // 2. Category Cap: Soft cap for category distribution
     const category = currentDraftPlayer.category;
-    const totalInCategory = players.filter(
-      (p) => p.category === category
-    ).length;
-    const capPerCategory = Math.ceil(totalInCategory / teamCount);
+    const totalPlayersInSystem =
+      players.length +
+      draftedTeams.reduce((acc, t) => acc + t.members.length, 0);
+    const globalCap = Math.ceil(totalPlayersInSystem / teamCount);
 
-    // 3. Filter Eligible Teams
+    // Category Cap
+    const playersInCat = players.filter((p) => p.category === category).length;
+    const draftedInCat = draftedTeams.reduce(
+      (acc, t) => acc + t.stats[category],
+      0
+    );
+    const totalCat = playersInCat + draftedInCat;
+    const capPerCategory = Math.ceil(totalCat / teamCount);
+
     let eligibleTeams = draftedTeams.filter(
       (team) =>
-        team.stats[category] < capPerCategory && // Must need this category
-        team.members.length < globalCap // Must have room for a player
+        team.stats[category] < capPerCategory && team.members.length < globalCap
     );
 
-    // Fallback 1: If category cap is too strict (edge cases), drop category check but KEEP global cap
     if (eligibleTeams.length === 0) {
       eligibleTeams = draftedTeams.filter(
         (team) => team.members.length < globalCap
       );
     }
-
-    // Fallback 2: If somehow everyone is full (shouldn't happen if math is right), allow all
     if (eligibleTeams.length === 0) eligibleTeams = draftedTeams;
 
     const scores = eligibleTeams.map((t) => getTeamScore(t));
@@ -168,31 +181,28 @@ const App = () => {
     });
   }, [currentDraftPlayer, draftedTeams, players, teamCount]);
 
-  // --- Draw Wheel on Canvas ---
+  // --- Draw Wheel ---
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas || wheelSegments.length === 0) return;
 
     const ctx = canvas.getContext("2d");
-    const size = 500; // High res
+    const size = 500;
     canvas.width = size;
     canvas.height = size;
-
     const centerX = size / 2;
     const centerY = size / 2;
-    const radius = size / 2 - 10; // Padding
+    const radius = size / 2 - 10;
 
     ctx.clearRect(0, 0, size, size);
 
     const totalWeight = wheelSegments.reduce((sum, t) => sum + t.weight, 0);
-    // Start at -90deg (12 o'clock) so CSS rotation 0 aligns with Top
     let startAngle = -Math.PI / 2;
 
     wheelSegments.forEach((team, index) => {
       const sliceAngle = (team.weight / totalWeight) * 2 * Math.PI;
       const endAngle = startAngle + sliceAngle;
 
-      // Draw Segment
       ctx.beginPath();
       ctx.moveTo(centerX, centerY);
       ctx.arc(centerX, centerY, radius, startAngle, endAngle);
@@ -200,18 +210,16 @@ const App = () => {
       ctx.fillStyle = WHEEL_COLORS[index % WHEEL_COLORS.length];
       ctx.fill();
       ctx.lineWidth = 4;
-      ctx.strokeStyle = "#0f172a"; // Border between slices
+      ctx.strokeStyle = "#0f172a";
       ctx.stroke();
 
-      // Draw Text
       ctx.save();
       ctx.translate(centerX, centerY);
-      ctx.rotate(startAngle + sliceAngle / 2); // Rotate to middle of slice
+      ctx.rotate(startAngle + sliceAngle / 2);
       ctx.textAlign = "right";
       ctx.textBaseline = "middle";
       ctx.fillStyle = "#ffffff";
       ctx.font = "bold 24px monospace";
-      // Draw text from edge inwards
       ctx.fillText(team.name.toUpperCase(), radius - 30, 0);
       ctx.restore();
 
@@ -224,7 +232,7 @@ const App = () => {
     if (newEvent === eventName) return;
     setEventHistory((prev) => ({
       ...prev,
-      [eventName]: { players, teamCount, teamNames },
+      [eventName]: { players, teamCount, teamNames, teamCaptains },
     }));
     const savedData = eventHistory[newEvent];
     setEventName(newEvent);
@@ -233,12 +241,14 @@ const App = () => {
     setTeamNames(
       savedData.teamNames ||
         Array.from(
-          { length: savedData.teamCount || 2 },
+          { length: 2 },
           (_, i) => `Team ${String.fromCharCode(65 + i)}`
         )
     );
+    setTeamCaptains(savedData.teamCaptains || [null, null]);
     setInputPosition(positionOptions[newEvent][0]);
     setIsDrafting(false);
+    setIsAuctioning(false);
     setShowFinalResults(false);
   };
 
@@ -277,13 +287,17 @@ const App = () => {
     setTeamNames((prev) => {
       const newNames = [...prev];
       if (newCount > prev.length) {
-        for (let i = prev.length; i < newCount; i++) {
+        for (let i = prev.length; i < newCount; i++)
           newNames.push(`Team ${String.fromCharCode(65 + i)}`);
-        }
-      } else {
-        newNames.length = newCount;
-      }
+      } else newNames.length = newCount;
       return newNames;
+    });
+    setTeamCaptains((prev) => {
+      const newCaptains = [...prev];
+      if (newCount > prev.length) {
+        for (let i = prev.length; i < newCount; i++) newCaptains.push(null);
+      } else newCaptains.length = newCount;
+      return newCaptains;
     });
   };
 
@@ -293,39 +307,193 @@ const App = () => {
     setTeamNames(newNames);
   };
 
+  // --- CAPTAIN LOGIC ---
+  const openCaptainSelection = (player) => {
+    setCaptainSelection({ player });
+  };
+
+  const confirmCaptainAssignment = (teamIndex) => {
+    if (!captainSelection) return;
+
+    const prevCaptain = teamCaptains[teamIndex];
+    let updatedPlayers = players.filter(
+      (p) => p.id !== captainSelection.player.id
+    );
+
+    if (prevCaptain) {
+      updatedPlayers.push(prevCaptain);
+    }
+
+    const newCaptains = [...teamCaptains];
+    newCaptains[teamIndex] = captainSelection.player;
+
+    setTeamCaptains(newCaptains);
+    setPlayers(updatedPlayers);
+    setCaptainSelection(null);
+  };
+
+  const removeCaptain = (teamIndex) => {
+    const captain = teamCaptains[teamIndex];
+    if (captain) {
+      setPlayers([...players, captain]);
+      const newCaptains = [...teamCaptains];
+      newCaptains[teamIndex] = null;
+      setTeamCaptains(newCaptains);
+    }
+  };
+
+  // --- START LOGIC ---
+  const initializeTeams = () => {
+    return Array.from({ length: teamCount }, (_, i) => {
+      const captain = teamCaptains[i];
+      const members = captain ? [captain] : [];
+      const stats = { "Category A": 0, "Category B": 0, "Category C": 0 };
+
+      if (captain) {
+        stats[captain.category] += 1;
+      }
+
+      const startScore = captain ? SCORES[captain.category] : 0;
+
+      return {
+        id: i,
+        name: teamNames[i] || `Team ${String.fromCharCode(65 + i)}`,
+        captain: captain ? captain.name : "TBD",
+        members: members,
+        stats: stats,
+        totalScore: startScore,
+      };
+    });
+  };
+
+  const prepareQueue = () => {
+    // Updated: Random shuffle of ALL players, mixing categories completely
+    const allPlayers = [...players];
+    return allPlayers.sort(() => getRandomOffset());
+  };
+
   const startDraft = () => {
-    if (players.length < teamCount) {
-      alert("Not enough players to create teams!");
+    const missingCaptains = teamCaptains.some((c) => c === null);
+    if (missingCaptains) {
+      if (!confirm("Some teams don't have captains. Continue anyway?")) return;
+    }
+    if (players.length === 0) {
+      alert("No players in pool!");
       return;
     }
-    const shuffle = (array) => array.sort(() => getRandomOffset());
-    const catA = shuffle(players.filter((p) => p.category === "Category A"));
-    const catB = shuffle(players.filter((p) => p.category === "Category B"));
-    const catC = shuffle(players.filter((p) => p.category === "Category C"));
 
-    const queue = [...catA, ...catB, ...catC];
-
-    const initialTeams = Array.from({ length: teamCount }, (_, i) => ({
-      id: i,
-      name: teamNames[i] || `Team ${String.fromCharCode(65 + i)}`,
-      members: [],
-      stats: { "Category A": 0, "Category B": 0, "Category C": 0 },
-      totalScore: 0,
-    }));
-
+    const queue = prepareQueue();
     setDraftQueue(queue);
-    setDraftedTeams(initialTeams);
+    setUnsoldPlayers([]); // Reset unsold
+    setDraftedTeams(initializeTeams());
     setDraftHistory([]);
     setCurrentDraftPlayer(queue[0]);
     setIsDrafting(true);
+    setIsAuctioning(false);
     setShowFinalResults(false);
+    setIsFinalizing(false);
   };
 
+  const startAuction = () => {
+    const missingCaptains = teamCaptains.some((c) => c === null);
+    if (missingCaptains) {
+      if (!confirm("Some teams don't have captains. Continue anyway?")) return;
+    }
+    if (players.length === 0) {
+      alert("No players in pool!");
+      return;
+    }
+
+    const queue = prepareQueue();
+    setDraftQueue(queue);
+    setUnsoldPlayers([]); // Reset unsold
+    setDraftedTeams(initializeTeams());
+    setDraftHistory([]);
+    setCurrentDraftPlayer(queue[0]);
+    setIsAuctioning(true);
+    setIsDrafting(false);
+    setShowFinalResults(false);
+    setIsFinalizing(false);
+  };
+
+  // --- QUEUE MANAGEMENT LOGIC ---
+  // FIXED: Accepting currentTeams to ensure we check against the LATEST state
+  const moveToNextPlayer = (
+    currentUnsoldList = unsoldPlayers,
+    currentTeams = draftedTeams
+  ) => {
+    const remainingQueue = draftQueue.slice(1);
+
+    if (remainingQueue.length > 0) {
+      setDraftQueue(remainingQueue);
+      setCurrentDraftPlayer(remainingQueue[0]);
+    } else {
+      // Queue is empty, check Unsold players
+      if (currentUnsoldList.length > 0) {
+        alert(
+          `Round Complete! Starting Auction for ${currentUnsoldList.length} Unsold Players.`
+        );
+        const newQueue = [...currentUnsoldList].sort(() => getRandomOffset());
+        setDraftQueue(newQueue);
+        setUnsoldPlayers([]); // Clear the unsold list since they are back in queue
+        setCurrentDraftPlayer(newQueue[0]);
+      } else {
+        // Truly finished
+        setCurrentDraftPlayer(null);
+        setIsFinalizing(true);
+        setTimeout(() => {
+          // FIXED: Use the passed currentTeams to set generatedTeams
+          setGeneratedTeams(currentTeams);
+          setIsDrafting(false);
+          setIsAuctioning(false);
+          setIsFinalizing(false);
+          setShowFinalResults(true);
+        }, 3000);
+      }
+    }
+  };
+
+  // --- AUCTION LOGIC ---
+  const handleAuctionSale = (team) => {
+    const totalPlayers =
+      players.length +
+      draftedTeams.reduce((acc, t) => acc + t.members.length, 0);
+    const globalCap = Math.ceil(totalPlayers / teamCount);
+
+    if (team.members.length >= globalCap) {
+      if (
+        !confirm(
+          `${team.name} has reached the balanced size (${globalCap}). Add anyway?`
+        )
+      )
+        return;
+    }
+    setAuctionWinner({ team, player: currentDraftPlayer });
+  };
+
+  const handleUnsold = () => {
+    const updatedUnsold = [...unsoldPlayers, currentDraftPlayer];
+    setUnsoldPlayers(updatedUnsold);
+    // Pass draftedTeams explicitly so we don't lose state if this was the last player
+    moveToNextPlayer(updatedUnsold, draftedTeams);
+  };
+
+  const confirmAuctionSale = () => {
+    if (auctionWinner) {
+      assignPlayerToTeam(auctionWinner.team);
+      setAuctionWinner(null);
+    }
+  };
+
+  const cancelAuctionSale = () => {
+    setAuctionWinner(null);
+  };
+
+  // --- DRAFT WHEEL LOGIC ---
   const spinWheel = () => {
     if (isSpinning || !currentDraftPlayer || wheelSegments.length === 0) return;
 
     setIsSpinning(true);
-
     const totalWeight = wheelSegments.reduce((sum, t) => sum + t.weight, 0);
     let randomNum = getRandomFloat(totalWeight);
     let winnerTeam = wheelSegments[0];
@@ -340,7 +508,6 @@ const App = () => {
 
     let currentAngle = 0;
     let winnerCenterAngle = 0;
-
     for (let team of wheelSegments) {
       const sliceAngle = (team.weight / totalWeight) * 360;
       if (team.id === winnerTeam.id) {
@@ -353,26 +520,22 @@ const App = () => {
     const landingRotation = 360 - winnerCenterAngle;
     const fullSpins = 360 * 5;
     const currentMod = wheelRotation % 360;
-
     const distanceToTarget = landingRotation - currentMod;
     const targetRotation =
       wheelRotation +
       fullSpins +
       (distanceToTarget > 0 ? distanceToTarget : 360 + distanceToTarget);
-
     const winnerSlice = (winnerTeam.weight / totalWeight) * 360;
     const safeOffset = getRandomFloat(winnerSlice * 0.6) - winnerSlice * 0.3;
 
     setWheelRotation(targetRotation + safeOffset);
 
     setTimeout(() => {
-      // Pausing here to show modal instead of auto-assigning
       setDraftWinner({ team: winnerTeam, player: currentDraftPlayer });
       setIsSpinning(false);
     }, 3000);
   };
 
-  // Called when user clicks "Confirm" on the modal
   const handleConfirmDraft = () => {
     if (draftWinner) {
       assignPlayerToTeam(draftWinner.team);
@@ -380,8 +543,9 @@ const App = () => {
     }
   };
 
+  // --- COMMON ASSIGNMENT LOGIC ---
   const assignPlayerToTeam = (team) => {
-    if (!team) return;
+    // Create the updated teams array
     const updatedTeams = draftedTeams.map((t) => {
       if (t.id === team.id) {
         return {
@@ -397,52 +561,31 @@ const App = () => {
       }
       return t;
     });
+
+    // Update state
     setDraftedTeams(updatedTeams);
     setDraftHistory((prev) => [
       { player: currentDraftPlayer, team: team },
       ...prev,
     ]);
 
-    const remainingQueue = draftQueue.slice(1);
-    setDraftQueue(remainingQueue);
-
-    if (remainingQueue.length > 0) {
-      setCurrentDraftPlayer(remainingQueue[0]);
-    } else {
-      setCurrentDraftPlayer(null);
-      setTimeout(() => {
-        setGeneratedTeams(updatedTeams);
-        setIsDrafting(false);
-        setShowFinalResults(true);
-      }, 1500);
-    }
+    // FIXED: Pass the *locally calculated* updatedTeams to ensure the final check sees the latest data
+    moveToNextPlayer(unsoldPlayers, updatedTeams);
   };
 
-  // --- Auto Draft with GLOBAL CAP ---
+  // --- AUTO DRAFT ---
   const autoDraftRemaining = () => {
-    let tempQueue = [...draftQueue];
+    let tempQueue = [...draftQueue, ...unsoldPlayers];
     let tempTeams = JSON.parse(JSON.stringify(draftedTeams));
-
-    const globalCap = Math.ceil(players.length / teamCount); // Enforce Global Cap
+    const totalPlayers =
+      players.length +
+      draftedTeams.reduce((acc, t) => acc + t.members.length, 0);
+    const globalCap = Math.ceil(totalPlayers / teamCount);
 
     tempQueue.forEach((player) => {
       const category = player.category;
-      const totalInCategory = players.filter(
-        (p) => p.category === category
-      ).length;
-      const capPerCategory = Math.ceil(totalInCategory / teamCount);
 
-      // Filter: Must fit Category Cap AND Global Cap
-      let available = tempTeams.filter(
-        (t) =>
-          t.stats[category] < capPerCategory && t.members.length < globalCap
-      );
-
-      // Fallback: Drop Category Cap, keep Global Cap
-      if (available.length === 0) {
-        available = tempTeams.filter((t) => t.members.length < globalCap);
-      }
-      // Last Resort
+      let available = tempTeams.filter((t) => t.members.length < globalCap);
       if (available.length === 0) available = tempTeams;
 
       const scores = available.map((t) => getTeamScore(t));
@@ -475,7 +618,9 @@ const App = () => {
 
     setGeneratedTeams(tempTeams);
     setDraftQueue([]);
+    setUnsoldPlayers([]);
     setIsDrafting(false);
+    setIsAuctioning(false);
     setShowFinalResults(true);
   };
 
@@ -525,7 +670,6 @@ const App = () => {
       html2canvas: { scale: 2, useCORS: true },
       jsPDF: { unit: "mm", format: "a4", orientation: "landscape" },
     };
-
     setIsSpinning(true);
     window
       .html2pdf()
@@ -565,159 +709,309 @@ const App = () => {
       </header>
 
       <main className="max-w-7xl mx-auto px-4 mt-8">
-        {isDrafting ? (
+        {/* --- CAPTAIN SELECTION MODAL --- */}
+        {captainSelection && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
+            <div className="bg-slate-900 border border-slate-700 p-6 rounded-2xl shadow-2xl max-w-md w-full">
+              <h3 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
+                <Crown className="text-yellow-500" /> Assign Captain
+              </h3>
+              <p className="text-slate-400 text-sm mb-6">
+                Select a team for{" "}
+                <strong>{captainSelection.player.name}</strong>.
+              </p>
+              <div className="grid gap-3">
+                {teamNames.map((name, idx) => (
+                  <button
+                    key={idx}
+                    onClick={() => confirmCaptainAssignment(idx)}
+                    className="flex justify-between items-center p-4 bg-slate-950 border border-slate-800 rounded-xl hover:border-cyan-500 hover:bg-cyan-900/10 transition-all group"
+                  >
+                    <span className="font-bold text-slate-200 group-hover:text-cyan-400">
+                      {name}
+                    </span>
+                    {teamCaptains[idx] ? (
+                      <span className="text-xs text-red-400">Has Captain</span>
+                    ) : (
+                      <span className="text-xs text-slate-500 group-hover:text-cyan-500">
+                        Select
+                      </span>
+                    )}
+                  </button>
+                ))}
+              </div>
+              <button
+                onClick={() => setCaptainSelection(null)}
+                className="mt-6 w-full py-3 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800 transition-colors text-sm"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* --- FINALIZING LOADING SCREEN --- */}
+        {isFinalizing && (
+          <div className="fixed inset-0 bg-slate-950 z-[70] flex flex-col items-center justify-center animate-in fade-in duration-500">
+            <div className="relative mb-8">
+              <div className="absolute inset-0 bg-cyan-500 rounded-full blur-2xl opacity-20 animate-pulse"></div>
+              <div className="relative w-24 h-24 border-4 border-slate-800 border-t-cyan-500 rounded-full animate-spin"></div>
+              <div className="absolute inset-0 flex items-center justify-center">
+                <Cpu size={32} className="text-cyan-500 animate-pulse" />
+              </div>
+            </div>
+            <h2 className="text-4xl font-black uppercase tracking-widest text-white animate-pulse text-center">
+              Draft Complete
+            </h2>
+            <p className="text-cyan-400 font-mono mt-2">
+              Generating Final Rosters...
+            </p>
+          </div>
+        )}
+
+        {/* --- DRAFT & AUCTION OVERLAY --- */}
+        {isDrafting || isAuctioning ? (
           <div className="fixed inset-0 bg-slate-950 z-50 flex flex-col animate-in fade-in duration-500 overflow-y-auto">
-            {/* Draft Header */}
             <div className="p-6 border-b border-slate-800 flex justify-between items-center bg-slate-900/50 backdrop-blur">
               <div className="flex items-center gap-4">
-                <Activity className="text-cyan-400 animate-pulse" />
+                {isAuctioning ? (
+                  <Gavel className="text-yellow-400 animate-bounce" />
+                ) : (
+                  <Activity className="text-cyan-400 animate-pulse" />
+                )}
                 <div>
                   <h2 className="text-2xl font-black uppercase italic text-white">
-                    Live Draft Room
+                    {isAuctioning ? "Live Auction Room" : "Live Draft Room"}
                   </h2>
                   <p className="text-xs text-slate-400">
-                    Balancing Teams • Randomizing Picks
+                    {isAuctioning
+                      ? "Manual Bidding • Sell to Highest Bidder"
+                      : "Balancing Teams • Randomizing Picks"}
                   </p>
                 </div>
               </div>
-              {/* Header Buttons Container */}
               <div className="flex items-center gap-3">
                 <button
-                  onClick={() => setIsDrafting(false)}
+                  onClick={() => {
+                    setIsDrafting(false);
+                    setIsAuctioning(false);
+                  }}
                   className="flex items-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 rounded-lg text-xs font-bold uppercase tracking-wider border border-slate-700 transition-colors text-slate-300 hover:text-white"
                 >
                   <ArrowLeft size={16} /> Back
                 </button>
-                <button
-                  onClick={autoDraftRemaining}
-                  className="flex items-center gap-2 px-4 py-2 bg-cyan-900/30 hover:bg-cyan-900/50 rounded-lg text-xs font-bold uppercase tracking-wider border border-cyan-800/50 text-cyan-400 transition-colors"
-                >
-                  <FastForward size={16} /> Auto-Finish
-                </button>
+                {!isAuctioning && (
+                  <button
+                    onClick={autoDraftRemaining}
+                    className="flex items-center gap-2 px-4 py-2 bg-cyan-900/30 hover:bg-cyan-900/50 rounded-lg text-xs font-bold uppercase tracking-wider border border-cyan-800/50 text-cyan-400 transition-colors"
+                  >
+                    <FastForward size={16} /> Auto-Finish
+                  </button>
+                )}
               </div>
             </div>
 
             <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-6 p-6">
-              {/* Left: Player Card */}
+              {/* Left: Player Card (Draft Mode) OR Bidding Panel (Auction Mode) */}
               <div className="lg:col-span-3 flex flex-col gap-4">
-                <div className="bg-slate-900 border border-cyan-500/30 p-6 rounded-2xl shadow-[0_0_30px_rgba(34,211,238,0.1)] flex flex-col items-center text-center relative overflow-hidden">
-                  <div className="absolute top-0 w-full h-1 bg-gradient-to-r from-transparent via-cyan-500 to-transparent"></div>
-                  <h3 className="text-xs font-bold text-cyan-400 uppercase tracking-widest mb-4">
-                    Current Player On Block
-                  </h3>
-                  <div className="w-32 h-32 rounded-full border-4 border-slate-800 shadow-xl overflow-hidden mb-4 relative">
-                    {currentDraftPlayer?.photo ? (
-                      <img
-                        src={currentDraftPlayer.photo}
-                        alt="Player"
-                        className="w-full h-full object-cover"
-                      />
-                    ) : (
-                      <div className="w-full h-full bg-slate-800 flex items-center justify-center text-3xl font-bold text-slate-600">
-                        ?
-                      </div>
-                    )}
-                    <div className="absolute inset-0 rounded-full border border-white/10"></div>
-                  </div>
-                  <h2 className="text-2xl font-black text-white uppercase italic">
-                    {currentDraftPlayer?.name || "Loading..."}
-                  </h2>
-                  <div className="flex gap-2 mt-2 justify-center">
-                    <span className="bg-slate-800 px-2 py-1 rounded text-xs font-mono uppercase text-slate-400">
-                      {currentDraftPlayer?.position}
-                    </span>
-                    <span className="bg-slate-800 px-2 py-1 rounded text-xs font-mono uppercase text-slate-400">
-                      {currentDraftPlayer?.batch}
-                    </span>
-                    <span
-                      className={`px-2 py-1 rounded text-xs font-bold uppercase ${
-                        currentDraftPlayer?.category === "Category A"
-                          ? "bg-yellow-500 text-black"
-                          : currentDraftPlayer?.category === "Category B"
-                          ? "bg-blue-500 text-white"
-                          : "bg-slate-600 text-white"
-                      }`}
-                    >
-                      {currentDraftPlayer?.category}
-                    </span>
-                  </div>
-                </div>
-
-                <div className="flex-1 bg-slate-900/50 border border-slate-800 rounded-2xl p-4 overflow-hidden flex flex-col">
-                  <h3 className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-3 flex items-center gap-2">
-                    <History size={12} /> Recent Picks
-                  </h3>
-                  <div className="overflow-y-auto space-y-2 pr-2 custom-scrollbar flex-1 max-h-[200px] lg:max-h-none">
-                    {draftHistory.map((log, idx) => (
-                      <div
-                        key={idx}
-                        className="flex justify-between items-center p-2 bg-slate-950 border border-slate-800 rounded-lg text-xs animate-in slide-in-from-left-4 fade-in duration-300"
-                      >
-                        <div className="flex items-center gap-2">
-                          <div className="w-1 h-8 bg-cyan-500 rounded-full"></div>
-                          <div>
-                            <p className="font-bold text-slate-200">
-                              {log.player.name}
-                            </p>
-                            <p className="text-[10px] text-slate-500 uppercase">
-                              {log.player.category}
-                            </p>
+                {isAuctioning ? (
+                  <div className="bg-slate-900 border border-slate-800 p-4 rounded-2xl h-full overflow-y-auto flex flex-col">
+                    <h3 className="text-center text-white uppercase font-black text-sm mb-4 tracking-widest flex items-center justify-center gap-2 border-b border-slate-800 pb-4">
+                      <Gavel className="text-yellow-400" size={16} /> Place Bid
+                    </h3>
+                    <div className="flex-1 space-y-3">
+                      {draftedTeams.map((team) => (
+                        <button
+                          key={team.id}
+                          onClick={() => handleAuctionSale(team)}
+                          className="w-full bg-slate-950 border border-slate-800 hover:border-cyan-500 p-3 rounded-xl text-left transition-all hover:bg-slate-900 group relative"
+                        >
+                          <div className="flex justify-between items-center mb-1">
+                            <h4 className="font-bold text-white uppercase text-sm">
+                              {team.name}
+                            </h4>
+                            <span className="text-[10px] bg-slate-900 px-1.5 py-0.5 rounded text-slate-400 font-mono">
+                              {team.members.length}
+                            </span>
                           </div>
-                        </div>
-                        <div className="text-right">
-                          <p className="font-bold text-cyan-400">
-                            {log.team.name}
+                          <p className="text-[10px] text-slate-500 flex items-center gap-1">
+                            <Crown size={10} /> {team.captain}
                           </p>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-
-              {/* Center: Canvas Wheel */}
-              <div className="lg:col-span-6 flex flex-col items-center justify-center relative min-h-[400px]">
-                <div className="relative w-80 h-80 md:w-96 md:h-96">
-                  {/* Pointer */}
-                  <div className="absolute -top-6 left-1/2 -translate-x-1/2 z-20 text-cyan-500 drop-shadow-[0_0_10px_rgba(34,211,238,0.8)]">
-                    <div className="w-0 h-0 border-l-[15px] border-l-transparent border-r-[15px] border-r-transparent border-t-[30px] border-t-cyan-500"></div>
-                  </div>
-
-                  {/* Canvas Wheel */}
-                  <canvas
-                    ref={canvasRef}
-                    className="w-full h-full rounded-full border-8 border-slate-800 shadow-[0_0_50px_rgba(0,0,0,0.5)] transition-transform duration-[3000ms] cubic-bezier(0.25, 1, 0.5, 1)"
-                    style={{ transform: `rotate(${wheelRotation}deg)` }}
-                  />
-
-                  {/* Center Hub */}
-                  <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-20 h-20 bg-slate-900 border-4 border-cyan-500 rounded-full flex items-center justify-center z-10 shadow-[0_0_30px_cyan]">
+                        </button>
+                      ))}
+                    </div>
                     <button
-                      onClick={spinWheel}
-                      disabled={isSpinning}
-                      className="w-full h-full rounded-full flex flex-col items-center justify-center hover:bg-slate-800 transition-colors disabled:opacity-50"
+                      onClick={handleUnsold}
+                      className="w-full mt-4 bg-red-900/20 border border-red-500/30 text-red-400 py-3 rounded-xl font-bold uppercase tracking-widest hover:bg-red-500 hover:text-white transition-all flex items-center justify-center gap-2"
                     >
-                      {isSpinning ? (
-                        <Loader2 className="animate-spin text-cyan-400" />
-                      ) : (
-                        <Play className="ml-1 text-white fill-current" />
-                      )}
+                      <Ban size={16} /> Unsold
                     </button>
                   </div>
-                </div>
-                <p className="mt-8 text-slate-400 font-mono text-sm uppercase tracking-widest animate-pulse">
-                  {isSpinning
-                    ? "Randomizing Selection..."
-                    : "Press Play to Draft"}
-                </p>
+                ) : (
+                  // Standard Draft Left Panel (Player Card + History)
+                  <>
+                    <div className="bg-slate-900 border border-cyan-500/30 p-6 rounded-2xl shadow-[0_0_30px_rgba(34,211,238,0.1)] flex flex-col items-center text-center relative overflow-hidden">
+                      <div className="absolute top-0 w-full h-1 bg-gradient-to-r from-transparent via-cyan-500 to-transparent"></div>
+                      <h3 className="text-xs font-bold text-cyan-400 uppercase tracking-widest mb-4">
+                        Current Player On Block
+                      </h3>
+                      <div className="w-32 h-32 rounded-full border-4 border-slate-800 shadow-xl overflow-hidden mb-4 relative">
+                        {currentDraftPlayer?.photo ? (
+                          <img
+                            src={currentDraftPlayer.photo}
+                            alt="Player"
+                            className="w-full h-full object-cover"
+                          />
+                        ) : (
+                          <div className="w-full h-full bg-slate-800 flex items-center justify-center text-3xl font-bold text-slate-600">
+                            ?
+                          </div>
+                        )}
+                      </div>
+                      <h2 className="text-2xl font-black text-white uppercase italic">
+                        {currentDraftPlayer?.name || "Loading..."}
+                      </h2>
+                      <div className="flex gap-2 mt-2 justify-center">
+                        <span className="bg-slate-800 px-2 py-1 rounded text-xs font-mono uppercase text-slate-400">
+                          {currentDraftPlayer?.position}
+                        </span>
+                        <span className="bg-slate-800 px-2 py-1 rounded text-xs font-mono uppercase text-slate-400">
+                          {currentDraftPlayer?.batch}
+                        </span>
+                        <span
+                          className={`px-2 py-1 rounded text-xs font-bold uppercase ${
+                            currentDraftPlayer?.category === "Category A"
+                              ? "bg-yellow-500 text-black"
+                              : "bg-blue-500 text-white"
+                          }`}
+                        >
+                          {currentDraftPlayer?.category}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="flex-1 bg-slate-900/50 border border-slate-800 rounded-2xl p-4 overflow-hidden flex flex-col">
+                      <h3 className="text-xs font-bold text-slate-500 uppercase tracking-widest mb-3 flex items-center gap-2">
+                        <History size={12} /> Recent Picks
+                      </h3>
+                      <div className="overflow-y-auto space-y-2 pr-2 custom-scrollbar flex-1 max-h-[200px] lg:max-h-none">
+                        {draftHistory.map((log, idx) => (
+                          <div
+                            key={idx}
+                            className="flex justify-between items-center p-2 bg-slate-950 border border-slate-800 rounded-lg text-xs animate-in slide-in-from-left-4 fade-in duration-300"
+                          >
+                            <div className="flex items-center gap-2">
+                              <div className="w-1 h-8 bg-cyan-500 rounded-full"></div>
+                              <div>
+                                <p className="font-bold text-slate-200">
+                                  {log.player.name}
+                                </p>
+                                <p className="text-[10px] text-slate-500 uppercase">
+                                  {log.player.category}
+                                </p>
+                              </div>
+                            </div>
+                            <div className="text-right">
+                              <p className="font-bold text-cyan-400">
+                                {log.team.name}
+                              </p>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </>
+                )}
               </div>
 
-              {/* Right: Dashboard */}
+              {/* Center Area: Wheel (Draft) OR Big Player Card (Auction) */}
+              <div className="lg:col-span-6 flex flex-col items-center justify-center relative min-h-[400px]">
+                {isDrafting ? (
+                  <div className="relative w-80 h-80 md:w-96 md:h-96">
+                    <div className="absolute -top-6 left-1/2 -translate-x-1/2 z-20 text-cyan-500 drop-shadow-[0_0_10px_rgba(34,211,238,0.8)]">
+                      <div className="w-0 h-0 border-l-[15px] border-l-transparent border-r-[15px] border-r-transparent border-t-[30px] border-t-cyan-500"></div>
+                    </div>
+                    <canvas
+                      ref={canvasRef}
+                      className="w-full h-full rounded-full border-8 border-slate-800 shadow-[0_0_50px_rgba(0,0,0,0.5)] transition-transform duration-[3000ms] cubic-bezier(0.25, 1, 0.5, 1)"
+                      style={{ transform: `rotate(${wheelRotation}deg)` }}
+                    />
+                    <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-20 h-20 bg-slate-900 border-4 border-cyan-500 rounded-full flex items-center justify-center z-10 shadow-[0_0_30px_cyan]">
+                      <button
+                        onClick={spinWheel}
+                        disabled={isSpinning}
+                        className="w-full h-full rounded-full flex flex-col items-center justify-center hover:bg-slate-800 transition-colors disabled:opacity-50"
+                      >
+                        {isSpinning ? (
+                          <Loader2 className="animate-spin text-cyan-400" />
+                        ) : (
+                          <Play className="ml-1 text-white fill-current" />
+                        )}
+                      </button>
+                    </div>
+                    <p className="mt-8 text-slate-400 font-mono text-sm uppercase tracking-widest animate-pulse">
+                      {isSpinning
+                        ? "Randomizing Selection..."
+                        : "Press Play to Draft"}
+                    </p>
+                  </div>
+                ) : (
+                  // Auction Mode Center - BIG PLAYER CARD (Restored Rectangular Design)
+                  <div className="w-full max-w-md">
+                    <div className="bg-slate-900 border border-cyan-500/30 p-8 rounded-2xl shadow-[0_0_50px_rgba(34,211,238,0.15)] flex flex-col items-center text-center relative overflow-hidden transform scale-110">
+                      <div className="absolute top-0 w-full h-1 bg-gradient-to-r from-transparent via-cyan-500 to-transparent"></div>
+                      <h3 className="text-sm font-bold text-cyan-400 uppercase tracking-widest mb-6">
+                        Current Player On Block
+                      </h3>
+                      <div className="w-40 h-40 rounded-full border-4 border-slate-800 shadow-2xl overflow-hidden mb-6 relative">
+                        {currentDraftPlayer?.photo ? (
+                          <img
+                            src={currentDraftPlayer.photo}
+                            alt="Player"
+                            className="w-full h-full object-cover"
+                          />
+                        ) : (
+                          <div className="w-full h-full bg-slate-800 flex items-center justify-center text-4xl font-bold text-slate-600">
+                            ?
+                          </div>
+                        )}
+                        <div className="absolute inset-0 rounded-full border border-white/10"></div>
+                      </div>
+                      <h2 className="text-3xl font-black text-white uppercase italic mb-2">
+                        {currentDraftPlayer?.name || "Loading..."}
+                      </h2>
+                      <div className="flex gap-2 mt-2 justify-center">
+                        <span className="bg-slate-800 px-3 py-1 rounded text-sm font-mono uppercase text-slate-400">
+                          {currentDraftPlayer?.position}
+                        </span>
+                        <span className="bg-slate-800 px-3 py-1 rounded text-sm font-mono uppercase text-slate-400">
+                          {currentDraftPlayer?.batch}
+                        </span>
+                        <span
+                          className={`px-3 py-1 rounded text-sm font-bold uppercase ${
+                            currentDraftPlayer?.category === "Category A"
+                              ? "bg-yellow-500 text-black"
+                              : "bg-blue-500 text-white"
+                          }`}
+                        >
+                          {currentDraftPlayer?.category}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Right: Dashboard / Rosters */}
               <div className="lg:col-span-3 flex flex-col gap-4">
                 <div className="bg-slate-900 border border-slate-800 p-4 rounded-2xl h-full overflow-y-auto">
                   <h3 className="text-xs font-bold text-white uppercase tracking-widest mb-4 flex items-center gap-2">
-                    <Activity size={14} className="text-cyan-400" /> Live
-                    Balance
+                    {isAuctioning ? (
+                      <Users size={14} className="text-yellow-400" />
+                    ) : (
+                      <Activity size={14} className="text-cyan-400" />
+                    )}
+                    {isAuctioning ? "Live Rosters" : "Live Balance"}
                   </h3>
                   <div className="space-y-6">
                     {draftedTeams.map((team) => (
@@ -725,7 +1019,7 @@ const App = () => {
                         key={team.id}
                         className="bg-slate-950 p-4 rounded-xl border border-slate-800"
                       >
-                        <div className="flex justify-between items-center mb-3">
+                        <div className="flex justify-between items-center mb-2">
                           <h4 className="font-bold text-white uppercase">
                             {team.name}
                           </h4>
@@ -733,43 +1027,73 @@ const App = () => {
                             {team.members.length}
                           </span>
                         </div>
-                        <div className="space-y-2">
-                          {["Category A", "Category B", "Category C"].map(
-                            (cat) => {
-                              const totalCat = players.filter(
-                                (p) => p.category === cat
-                              ).length;
-                              const target = Math.ceil(totalCat / teamCount);
-                              const current = team.stats[cat];
-                              const percent =
-                                target > 0
-                                  ? Math.min(100, (current / target) * 100)
-                                  : 0;
-                              return (
-                                <div key={cat} className="space-y-1">
-                                  <div className="flex justify-between text-[10px] uppercase text-slate-500">
-                                    <span>{cat}</span>
-                                    <span>
-                                      {current} / {target}
-                                    </span>
+                        <p className="text-[10px] text-slate-500 mb-3 flex items-center gap-1">
+                          <User size={10} /> {team.captain}
+                        </p>
+
+                        {/* In Auction Mode, show list of names. In Draft Mode, show balance bars */}
+                        {isAuctioning ? (
+                          <div className="space-y-1">
+                            {team.members.length === 0 && (
+                              <p className="text-[10px] text-slate-600 italic">
+                                No players yet
+                              </p>
+                            )}
+                            {team.members.map((m, i) => (
+                              <div
+                                key={i}
+                                className="text-[10px] text-slate-400 flex justify-between border-b border-slate-800/50 pb-1 last:border-0"
+                              >
+                                <span>{m.name}</span>
+                                <span className="text-slate-600">
+                                  {m.category}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <div className="space-y-2">
+                            {["Category A", "Category B", "Category C"].map(
+                              (cat) => {
+                                const totalCat =
+                                  players.filter((p) => p.category === cat)
+                                    .length +
+                                  draftedTeams.reduce(
+                                    (acc, t) => acc + t.stats[cat],
+                                    0
+                                  );
+                                const target = Math.ceil(totalCat / teamCount);
+                                const current = team.stats[cat];
+                                const percent =
+                                  target > 0
+                                    ? Math.min(100, (current / target) * 100)
+                                    : 0;
+                                return (
+                                  <div key={cat} className="space-y-1">
+                                    <div className="flex justify-between text-[10px] uppercase text-slate-500">
+                                      <span>{cat}</span>
+                                      <span>
+                                        {current} / {target}
+                                      </span>
+                                    </div>
+                                    <div className="h-1.5 w-full bg-slate-800 rounded-full overflow-hidden">
+                                      <div
+                                        className={`h-full rounded-full transition-all duration-500 ${
+                                          cat === "Category A"
+                                            ? "bg-yellow-500"
+                                            : cat === "Category B"
+                                            ? "bg-blue-500"
+                                            : "bg-slate-500"
+                                        }`}
+                                        style={{ width: `${percent}%` }}
+                                      ></div>
+                                    </div>
                                   </div>
-                                  <div className="h-1.5 w-full bg-slate-800 rounded-full overflow-hidden">
-                                    <div
-                                      className={`h-full rounded-full transition-all duration-500 ${
-                                        cat === "Category A"
-                                          ? "bg-yellow-500"
-                                          : cat === "Category B"
-                                          ? "bg-blue-500"
-                                          : "bg-slate-500"
-                                      }`}
-                                      style={{ width: `${percent}%` }}
-                                    ></div>
-                                  </div>
-                                </div>
-                              );
-                            }
-                          )}
-                        </div>
+                                );
+                              }
+                            )}
+                          </div>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -777,14 +1101,13 @@ const App = () => {
               </div>
             </div>
 
-            {/* --- WINNER MODAL --- */}
+            {/* --- WINNER MODALS --- */}
             {draftWinner && (
               <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 backdrop-blur-sm animate-in fade-in duration-300">
                 <div className="bg-slate-900 border border-cyan-500/30 p-8 rounded-2xl shadow-[0_0_50px_rgba(34,211,238,0.2)] max-w-sm w-full text-center transform scale-100 animate-in zoom-in-95 duration-200">
                   <h2 className="text-2xl font-black text-white uppercase italic mb-4">
                     Draft Pick!
                   </h2>
-
                   <div className="bg-slate-950 p-6 rounded-xl border border-slate-800 mb-6 relative overflow-hidden">
                     <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-cyan-500 to-transparent"></div>
                     <div className="text-sm text-slate-400 mb-2 uppercase tracking-widest">
@@ -795,13 +1118,46 @@ const App = () => {
                       {draftWinner.team.name}
                     </p>
                   </div>
-
                   <button
                     onClick={handleConfirmDraft}
                     className="w-full bg-cyan-600 text-white py-3 rounded-xl font-bold uppercase tracking-widest hover:bg-cyan-500 transition-all hover:shadow-[0_0_20px_rgba(34,211,238,0.4)] hover:-translate-y-0.5"
                   >
                     Continue Draft
                   </button>
+                </div>
+              </div>
+            )}
+
+            {auctionWinner && (
+              <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 backdrop-blur-sm animate-in fade-in duration-300">
+                <div className="bg-slate-900 border border-yellow-500/30 p-8 rounded-2xl shadow-[0_0_50px_rgba(234,179,8,0.2)] max-w-sm w-full text-center transform scale-100 animate-in zoom-in-95 duration-200">
+                  <h2 className="text-2xl font-black text-yellow-400 uppercase italic mb-4">
+                    SOLD!
+                  </h2>
+                  <div className="bg-slate-950 p-6 rounded-xl border border-slate-800 mb-6 relative overflow-hidden">
+                    <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-yellow-500 to-transparent"></div>
+                    <div className="text-sm text-slate-400 mb-2 uppercase tracking-widest">
+                      {auctionWinner.player.name} sold to
+                    </div>
+                    <Gavel className="w-12 h-12 text-yellow-400 mx-auto mb-2 animate-bounce" />
+                    <p className="text-3xl font-black text-white uppercase break-words leading-tight">
+                      {auctionWinner.team.name}
+                    </p>
+                  </div>
+                  <div className="flex gap-3">
+                    <button
+                      onClick={cancelAuctionSale}
+                      className="flex-1 bg-slate-800 text-slate-300 py-3 rounded-xl font-bold uppercase tracking-widest hover:bg-slate-700 transition-colors border border-slate-700"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={confirmAuctionSale}
+                      className="flex-1 bg-yellow-600 text-black py-3 rounded-xl font-bold uppercase tracking-widest hover:bg-yellow-500 transition-all hover:shadow-[0_0_20px_rgba(234,179,8,0.4)] hover:-translate-y-0.5"
+                    >
+                      Next Player
+                    </button>
+                  </div>
                 </div>
               </div>
             )}
@@ -855,26 +1211,78 @@ const App = () => {
                       max="10"
                       value={teamCount}
                       onChange={(e) => handleTeamCountChange(e.target.value)}
-                      className="w-full bg-slate-950 border border-slate-700 rounded-xl pl-4 pr-2 py-3 text-white focus:outline-none focus:border-cyan-500 font-mono text-lg"
+                      className="w-full bg-slate-950 border border-slate-700 rounded-xl pl-4 pr-24 py-3 text-white focus:outline-none focus:border-cyan-500 font-mono text-lg"
                     />
-                    <div className="absolute right-7 top-1/2 -translate-y-1/2 text-slate-600 pointer-events-none text-xs font-bold">
+                    <div className="absolute right-14 top-1/2 -translate-y-1/2 text-slate-600 pointer-events-none text-xs font-bold">
                       COUNT
                     </div>
                   </div>
                   <div className="space-y-2 max-h-32 overflow-y-auto pr-2 custom-scrollbar bg-slate-950/50 p-2 rounded-lg border border-slate-800">
                     {teamNames.map((name, idx) => (
-                      <div key={idx} className="flex gap-2 items-center">
-                        <span className="text-xs text-slate-500 w-4">
-                          {String.fromCharCode(65 + idx)}
-                        </span>
-                        <input
-                          type="text"
-                          value={name}
-                          onChange={(e) =>
-                            handleTeamNameEdit(idx, e.target.value)
-                          }
-                          className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs text-cyan-200 focus:border-cyan-500 focus:outline-none"
-                        />
+                      <div
+                        key={idx}
+                        className="flex flex-col gap-2 mb-2 bg-slate-900 p-3 rounded-xl border border-slate-800"
+                      >
+                        <div className="flex justify-between items-center">
+                          <div className="flex gap-2 items-center flex-1">
+                            <span className="text-xs text-slate-500 w-4">
+                              {String.fromCharCode(65 + idx)}
+                            </span>
+                            <input
+                              type="text"
+                              value={name}
+                              onChange={(e) =>
+                                handleTeamNameEdit(idx, e.target.value)
+                              }
+                              className="w-full bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs text-cyan-200 focus:border-cyan-500 focus:outline-none"
+                              placeholder="Team Name"
+                            />
+                          </div>
+                        </div>
+                        {/* Assigned Captain Display */}
+                        <div className="flex items-center gap-3 pl-6 mt-1">
+                          <div className="w-8 h-8 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center overflow-hidden">
+                            {teamCaptains[idx] ? (
+                              teamCaptains[idx].photo ? (
+                                <img
+                                  src={teamCaptains[idx].photo}
+                                  className="w-full h-full object-cover"
+                                  alt="C"
+                                />
+                              ) : (
+                                <span className="text-xs font-bold text-slate-500">
+                                  {teamCaptains[idx].name[0]}
+                                </span>
+                              )
+                            ) : (
+                              <User size={14} className="text-slate-600" />
+                            )}
+                          </div>
+                          <div className="flex-1">
+                            <p className="text-[10px] text-slate-500 uppercase tracking-wider">
+                              Captain
+                            </p>
+                            <p
+                              className={`text-xs font-bold ${
+                                teamCaptains[idx]
+                                  ? "text-yellow-400"
+                                  : "text-slate-600"
+                              }`}
+                            >
+                              {teamCaptains[idx]
+                                ? teamCaptains[idx].name
+                                : "Not Selected"}
+                            </p>
+                          </div>
+                          {teamCaptains[idx] && (
+                            <button
+                              onClick={() => removeCaptain(idx)}
+                              className="text-slate-600 hover:text-red-500 p-1"
+                            >
+                              <X size={14} />
+                            </button>
+                          )}
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -986,7 +1394,7 @@ const App = () => {
                       Batch-wise Sorting Active
                     </p>
                   </div>
-                  <div className="flex items-center gap-4 w-full md:w-auto">
+                  <div className="flex items-center gap-2 w-full md:w-auto">
                     <div className="bg-slate-950 px-4 py-2 rounded-lg border border-slate-800 text-xs font-mono text-slate-400">
                       Total:{" "}
                       <span className="text-white font-bold text-sm ml-1">
@@ -994,12 +1402,20 @@ const App = () => {
                       </span>
                     </div>
                     {players.length > 0 && (
-                      <button
-                        onClick={startDraft}
-                        className={`flex-1 md:flex-none px-8 py-3 rounded-lg font-bold uppercase tracking-wide flex items-center justify-center gap-2 ${theme.glow} bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white transition-all shadow-lg active:scale-95`}
-                      >
-                        <Play size={18} fill="currentColor" /> Start Live Draft
-                      </button>
+                      <>
+                        <button
+                          onClick={startDraft}
+                          className={`px-6 py-3 rounded-lg font-bold uppercase tracking-wide flex items-center justify-center gap-2 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white text-xs transition-all shadow-lg active:scale-95`}
+                        >
+                          <Play size={16} fill="currentColor" /> Draft
+                        </button>
+                        <button
+                          onClick={startAuction}
+                          className={`px-6 py-3 rounded-lg font-bold uppercase tracking-wide flex items-center justify-center gap-2 bg-gradient-to-r from-yellow-500 to-orange-600 hover:from-yellow-400 hover:to-orange-500 text-white text-xs transition-all shadow-lg active:scale-95`}
+                        >
+                          <Gavel size={16} /> Auction
+                        </button>
+                      </>
                     )}
                   </div>
                 </div>
@@ -1084,12 +1500,21 @@ const App = () => {
                                     </span>
                                   </div>
                                 </div>
-                                <button
-                                  onClick={() => removePlayer(player.id)}
-                                  className="text-slate-600 hover:text-red-500 p-1.5 rounded-md hover:bg-slate-700 transition-colors"
-                                >
-                                  <Trash2 size={13} />
-                                </button>
+                                {/* Updated Action Buttons: Delete and Crown (Assign Captain) */}
+                                <div className="flex gap-1">
+                                  <button
+                                    onClick={() => openCaptainSelection(player)}
+                                    className="text-slate-600 hover:text-yellow-400 p-1.5 rounded-md hover:bg-slate-700 transition-colors"
+                                  >
+                                    <Crown size={13} />
+                                  </button>
+                                  <button
+                                    onClick={() => removePlayer(player.id)}
+                                    className="text-slate-600 hover:text-red-500 p-1.5 rounded-md hover:bg-slate-700 transition-colors"
+                                  >
+                                    <Trash2 size={13} />
+                                  </button>
+                                </div>
                               </div>
                             ))}
                           {players.filter((p) => p.category === cat).length ===
@@ -1163,6 +1588,13 @@ const App = () => {
                     >
                       <Trophy size={20} />
                     </div>
+                  </div>
+                  {/* Captain Badge */}
+                  <div className="bg-slate-950 px-5 py-2 border-b border-slate-800 flex items-center gap-2">
+                    <Crown size={14} className="text-yellow-500" />
+                    <span className="text-xs font-bold text-slate-300 uppercase tracking-wider">
+                      {team.captain || "No Captain"}
+                    </span>
                   </div>
                   <div className="p-5 space-y-4">
                     {team.members.map((member, mIdx) => (
