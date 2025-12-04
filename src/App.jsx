@@ -22,6 +22,7 @@ import {
   X,
   RotateCcw,
   Ban,
+  AlertCircle, // Added Icon
 } from "lucide-react";
 
 // --- Helpers: Pure Logic ---
@@ -75,10 +76,10 @@ const App = () => {
   // Modes
   const [isDrafting, setIsDrafting] = useState(false);
   const [isAuctioning, setIsAuctioning] = useState(false);
-  const [isFinalizing, setIsFinalizing] = useState(false); // New State for Finalizing Popup
+  const [isFinalizing, setIsFinalizing] = useState(false);
 
   const [draftQueue, setDraftQueue] = useState([]);
-  const [unsoldPlayers, setUnsoldPlayers] = useState([]); // New State for Unsold
+  const [unsoldPlayers, setUnsoldPlayers] = useState([]);
   const [currentDraftPlayer, setCurrentDraftPlayer] = useState(null);
   const [draftedTeams, setDraftedTeams] = useState([]);
   const [draftHistory, setDraftHistory] = useState([]);
@@ -86,10 +87,11 @@ const App = () => {
   const [isSpinning, setIsSpinning] = useState(false);
   const [showFinalResults, setShowFinalResults] = useState(false);
 
-  // Modals
+  // Modals & Alerts
   const [draftWinner, setDraftWinner] = useState(null);
   const [auctionWinner, setAuctionWinner] = useState(null);
   const [captainSelection, setCaptainSelection] = useState(null);
+  const [alertMessage, setAlertMessage] = useState(null); // New Alert State
 
   // History State
   const [eventHistory, setEventHistory] = useState({
@@ -367,7 +369,6 @@ const App = () => {
   };
 
   const prepareQueue = () => {
-    // Updated: Random shuffle of ALL players, mixing categories completely
     const allPlayers = [...players];
     return allPlayers.sort(() => getRandomOffset());
   };
@@ -378,7 +379,7 @@ const App = () => {
       if (!confirm("Some teams don't have captains. Continue anyway?")) return;
     }
     if (players.length === 0) {
-      alert("No players in pool!");
+      setAlertMessage("No players in pool!");
       return;
     }
 
@@ -400,7 +401,7 @@ const App = () => {
       if (!confirm("Some teams don't have captains. Continue anyway?")) return;
     }
     if (players.length === 0) {
-      alert("No players in pool!");
+      setAlertMessage("No players in pool!");
       return;
     }
 
@@ -417,7 +418,6 @@ const App = () => {
   };
 
   // --- QUEUE MANAGEMENT LOGIC ---
-  // FIXED: Accepting currentTeams to ensure we check against the LATEST state
   const moveToNextPlayer = (
     currentUnsoldList = unsoldPlayers,
     currentTeams = draftedTeams
@@ -428,21 +428,18 @@ const App = () => {
       setDraftQueue(remainingQueue);
       setCurrentDraftPlayer(remainingQueue[0]);
     } else {
-      // Queue is empty, check Unsold players
       if (currentUnsoldList.length > 0) {
-        alert(
+        setAlertMessage(
           `Round Complete! Starting Auction for ${currentUnsoldList.length} Unsold Players.`
         );
         const newQueue = [...currentUnsoldList].sort(() => getRandomOffset());
         setDraftQueue(newQueue);
-        setUnsoldPlayers([]); // Clear the unsold list since they are back in queue
+        setUnsoldPlayers([]);
         setCurrentDraftPlayer(newQueue[0]);
       } else {
-        // Truly finished
         setCurrentDraftPlayer(null);
         setIsFinalizing(true);
         setTimeout(() => {
-          // FIXED: Use the passed currentTeams to set generatedTeams
           setGeneratedTeams(currentTeams);
           setIsDrafting(false);
           setIsAuctioning(false);
@@ -474,7 +471,6 @@ const App = () => {
   const handleUnsold = () => {
     const updatedUnsold = [...unsoldPlayers, currentDraftPlayer];
     setUnsoldPlayers(updatedUnsold);
-    // Pass draftedTeams explicitly so we don't lose state if this was the last player
     moveToNextPlayer(updatedUnsold, draftedTeams);
   };
 
@@ -545,7 +541,6 @@ const App = () => {
 
   // --- COMMON ASSIGNMENT LOGIC ---
   const assignPlayerToTeam = (team) => {
-    // Create the updated teams array
     const updatedTeams = draftedTeams.map((t) => {
       if (t.id === team.id) {
         return {
@@ -561,15 +556,12 @@ const App = () => {
       }
       return t;
     });
-
-    // Update state
     setDraftedTeams(updatedTeams);
     setDraftHistory((prev) => [
       { player: currentDraftPlayer, team: team },
       ...prev,
     ]);
 
-    // FIXED: Pass the *locally calculated* updatedTeams to ensure the final check sees the latest data
     moveToNextPlayer(unsoldPlayers, updatedTeams);
   };
 
@@ -626,12 +618,12 @@ const App = () => {
 
   const handleDownloadPDF = () => {
     if (!window.html2pdf) {
-      alert("PDF Lib loading...");
+      setAlertMessage("PDF Lib loading...");
       return;
     }
     const element = document.getElementById("roster-grid");
     if (!element) {
-      alert("No roster!");
+      setAlertMessage("No roster!");
       return;
     }
 
@@ -709,6 +701,29 @@ const App = () => {
       </header>
 
       <main className="max-w-7xl mx-auto px-4 mt-8">
+        {/* --- CUSTOM ALERT MODAL --- */}
+        {alertMessage && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/80 backdrop-blur-md animate-in fade-in duration-200">
+            <div className="bg-slate-900 border border-slate-700 p-6 rounded-2xl shadow-2xl max-w-sm w-full text-center transform scale-100 animate-in zoom-in-95 duration-200">
+              <div className="w-12 h-12 bg-slate-800 rounded-full flex items-center justify-center mx-auto mb-4 shadow-inner border border-slate-700">
+                <AlertCircle className="text-cyan-400" size={24} />
+              </div>
+              <h3 className="text-lg font-bold text-white mb-2 uppercase tracking-wider">
+                Players left for bid
+              </h3>
+              <p className="text-slate-400 text-sm mb-6 leading-relaxed">
+                {alertMessage}
+              </p>
+              <button
+                onClick={() => setAlertMessage(null)}
+                className="w-full bg-cyan-600 hover:bg-cyan-500 text-white py-3 rounded-xl font-bold uppercase tracking-widest transition-all shadow-lg hover:shadow-cyan-500/20"
+              >
+                Start Bid Again
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* --- CAPTAIN SELECTION MODAL --- */}
         {captainSelection && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
